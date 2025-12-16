@@ -1,20 +1,42 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
+import session from 'express-session';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import passport from './auth/passport';
 import { dbConnection } from './db/connection';
 import { redisConnection } from './queue/redis';
 import testRoutes from './routes/test.routes';
 import queueRoutes from './routes/queue.routes';
+import authRoutes from './routes/auth.routes';
 
 export function createApp(): Application {
   const app = express();
 
   app.use(helmet());
-  app.use(cors());
+  app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+  }));
   app.use(morgan('dev'));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET || 'session-secret',
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+      },
+    })
+  );
+
+  app.use(passport.initialize());
+  app.use(passport.session());
 
   app.get('/health', async (req: Request, res: Response) => {
     try {
@@ -37,6 +59,7 @@ export function createApp(): Application {
     }
   });
 
+  app.use('/api/auth', authRoutes);
   app.use('/api/test', testRoutes);
   app.use('/api/queue', queueRoutes);
 

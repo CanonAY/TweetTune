@@ -22,6 +22,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@superfaceai/passport-twitter-oauth2": "^1.2.4",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.28.2",
     "cookie-parser": "^1.4.7",
@@ -35,7 +36,6 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "passport": "^0.7.0",
-    "passport-twitter": "^1.0.4",
     "pg": "^8.13.1",
     "twitter-api-v2": "^1.18.2",
     "zod": "^3.24.1"

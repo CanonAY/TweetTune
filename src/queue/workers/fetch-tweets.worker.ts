@@ -2,8 +2,9 @@ import { Worker, Job } from 'bullmq';
 import { redisClient } from '../redis';
 import { JobType, FetchTweetsJobData, JobResult } from '../types';
 import { db } from '../../db/connection';
-import { podcasts } from '../../db/schema';
+import { podcasts, users, tweets } from '../../db/schema';
 import { eq } from 'drizzle-orm';
+import { createTwitterClient } from '../../services/twitter-client';
 
 export class FetchTweetsWorker {
   private worker: Worker;
@@ -42,17 +43,87 @@ export class FetchTweetsWorker {
 
     await job.updateProgress(10);
 
-    const mockTweetIds = Array.from({ length: 10 }, (_, i) => `tweet_${Date.now()}_${i}`);
+    const [podcast] = await db.select().from(podcasts).where(eq(podcasts.id, podcastId));
 
-    await job.updateProgress(50);
+    if (!podcast) {
+      throw new Error('Podcast not found');
+    }
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const [user] = await db.select().from(users).where(eq(users.id, podcast.userId));
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    await job.updateProgress(20);
+
+    const twitterClient = createTwitterClient(user.twitterAccessToken);
+
+    let fetchedTweets;
+
+    try {
+      if (sourceType === 'timeline') {
+        const me = await twitterClient.getMe();
+        fetchedTweets = await twitterClient.getUserTimeline(me.id, {
+          maxResults: filters?.minimumLikes ? 100 : 50,
+          excludeRetweets: filters?.includeRetweets === false,
+          excludeReplies: filters?.includeReplies === false,
+          startTime: filters?.dateRange?.start ? new Date(filters.dateRange.start) : undefined,
+          endTime: filters?.dateRange?.end ? new Date(filters.dateRange.end) : undefined,
+        });
+      } else if (sourceType === 'username') {
+        const targetUser = await twitterClient.getUserByUsername(sourceValue.replace('@', ''));
+        fetchedTweets = await twitterClient.getUserTimeline(targetUser.id, {
+          maxResults: 50,
+          excludeRetweets: filters?.includeRetweets === false,
+          excludeReplies: filters?.includeReplies === false,
+        });
+      } else if (sourceType === 'hashtag') {
+        fetchedTweets = await twitterClient.searchTweets(`#${sourceValue.replace('#', '')}`, {
+          maxResults: 50,
+        });
+      } else if (sourceType === 'url') {
+        const tweetId = sourceValue.split('/').pop()?.split('?')[0];
+        if (!tweetId) throw new Error('Invalid tweet URL');
+        fetchedTweets = await twitterClient.getThread(tweetId);
+      } else {
+        throw new Error(`Unsupported source type: ${sourceType}`);
+      }
+    } catch (error: any) {
+      console.error('Twitter API error:', error);
+      throw new Error(`Failed to fetch tweets: ${error.message}`);
+    }
+
+    await job.updateProgress(60);
+
+    const tweetIds: string[] = [];
+
+    for (const tweet of fetchedTweets) {
+      const existingTweet = await db
+        .select()
+        .from(tweets)
+        .where(eq(tweets.id, tweet.id))
+        .limit(1);
+
+      if (existingTweet.length === 0) {
+        await db.insert(tweets).values({
+          id: tweet.id,
+          authorUsername: user.twitterUsername,
+          text: tweet.text,
+          createdAt: new Date(tweet.created_at || Date.now()),
+          likeCount: tweet.public_metrics?.like_count || 0,
+          retweetCount: tweet.public_metrics?.retweet_count || 0,
+        });
+      }
+
+      tweetIds.push(tweet.id);
+    }
 
     await job.updateProgress(90);
 
     await db
       .update(podcasts)
-      .set({ tweetCount: mockTweetIds.length })
+      .set({ tweetCount: tweetIds.length })
       .where(eq(podcasts.id, podcastId));
 
     await job.updateProgress(100);
@@ -60,8 +131,8 @@ export class FetchTweetsWorker {
     return {
       success: true,
       data: {
-        tweetIds: mockTweetIds,
-        count: mockTweetIds.length,
+        tweetIds,
+        count: tweetIds.length,
       },
       timestamp: new Date(),
     };

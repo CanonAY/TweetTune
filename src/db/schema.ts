@@ -4,8 +4,13 @@ import { relations } from 'drizzle-orm';
 // Users table
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  twitterUsername: varchar('twitter_username', { length: 50 }),
+  email: varchar('email', { length: 255 }).unique(),
+  twitterId: varchar('twitter_id', { length: 100 }).notNull().unique(),
+  twitterUsername: varchar('twitter_username', { length: 50 }).notNull(),
+  twitterDisplayName: varchar('twitter_display_name', { length: 100 }),
+  twitterProfileImage: varchar('twitter_profile_image', { length: 500 }),
+  twitterAccessToken: text('twitter_access_token').notNull(),
+  twitterRefreshToken: text('twitter_refresh_token'),
   subscriptionTier: varchar('subscription_tier', { length: 20 }).default('free').notNull(),
   voicePreference: varchar('voice_preference', { length: 50 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
